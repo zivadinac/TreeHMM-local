@@ -12,8 +12,15 @@
 #include "BasinModel.h"
 #include "TreeBasin.h"
 
+// Choose either MATLAB or PYTHON to link to via Boost
+//#define MATLAB
+#define PYTHON
+
+
+#ifdef MATLAB
 #include "matrix.h"
 #include "mex.h"
+#endif
 
 #include <queue>
 #include <iostream>
@@ -22,8 +29,11 @@
 #include <exception>
 
 
-// Selects which basin model to use
+// Selects which basin model to use -- one of the two below
 typedef TreeBasin BasinType;
+//typedef IndependentBasin BasinType;
+
+#ifdef MATLAB
 
 template <typename T>
 void writeOutputMatrix(int pos, vector<T> value, int N, int M, mxArray**& plhs) {
@@ -60,6 +70,7 @@ void writeOutputStruct(int pos, vector<paramsStruct>& value, mxArray**& plhs) {
     return;
 }
 
+#endif
 
 vector<double> mpow(vector<double>& matrix, int n, int k) {
 
@@ -87,8 +98,12 @@ vector<double> mpow(vector<double>& matrix, int n, int k) {
 
 }
 
+#ifdef MATLAB
+
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
  // [freq,w,m,P,logli,prob] = EMBasins(st, unobserved_edges, binsize, nbasins, niter)
+ // returned params are wrong in number and order I think,
+ //  see at the end of this function for what is actually returned!
 
     cout << "Reading inputs..." << endl;
     int N = mxGetNumberOfElements(prhs[0]);
@@ -101,7 +116,8 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             st[i].push_back(elem_pr[n]);
         }
     }
-    
+
+/*    
     int n_unobserved_blocks = mxGetM(prhs[1]);
     vector<double> unobserved_edges_low (n_unobserved_blocks);
     vector<double> unobserved_edges_high (n_unobserved_blocks);
@@ -114,10 +130,18 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             unobserved_edges_high[n] = unobserved_edges_pr[n_unobserved_blocks + n];
         }
     }
-    
+*/
+
+/*
     double binsize = *mxGetPr(prhs[2]);
     int nbasins = (int) *mxGetPr(prhs[3]);
     int niter = (int) *mxGetPr(prhs[4]);
+*/
+
+    double binsize = *mxGetPr(prhs[1]);
+    int nbasins = (int) *mxGetPr(prhs[2]);
+    int niter = (int) *mxGetPr(prhs[3]);
+    
 
   /*
     // Autocorrelation model
@@ -157,9 +181,11 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 //    writeOutputMatrix(3, basin_obj.sample(100000), N,100000, plhs);
     */
     
-    
+/*    
     // Hidden Markov model
     HMM<BasinType> basin_obj(st, unobserved_edges_low, unobserved_edges_high, binsize, nbasins);
+    // Aditya notes: I modified train(), it now returns a tuple of vector<double>
+    //  see below pyHMM for usage.
     vector<double> logli = basin_obj.train(niter);
     cout << "Viterbi..." << endl;
     vector<int> alpha = basin_obj.viterbi(true);
@@ -189,9 +215,9 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     writeOutputMatrix(7, basin_obj.sample(100000), N,100000, plhs);
 //    writeOutputMatrix(7, basin_obj.word_list(), N, hist.size(), plhs);
 //    writeOutputMatrix(6, basin_obj.stationary_prob(), 1,nbasins, plhs);
+*/    
     
     
-    /*
     // Mixture model
     cout << "Initializing EM..." << endl;
     EMBasins<BasinType> basin_obj(st, binsize, nbasins);
@@ -224,7 +250,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     writeOutputMatrix(6, logli, niter, 1, plhs);
 //    writeOutputMatrix(6, P_test, nbasins, P_test.size()/nbasins, plhs);
    
-    */
+    
     
     /*
     // k-fold cross-validation
@@ -238,6 +264,268 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     return;
 }
 
+#endif
+
+#ifdef PYTHON
+
+#include<boost/python.hpp>
+// numpy.hpp needs boost >= 1.63.0, on IST cluster: `module load boost` to get 1.70.0
+#include<boost/python/numpy.hpp>
+
+namespace py = boost::python;
+namespace np = boost::python::numpy;
+
+template <typename T>
+np::ndarray writePyOutputMatrix(vector<T> value, int rows, int cols) {
+// convert C++ vector / 2D vector to a Python numpy array of rows x cols
+// be sure to only pass vector<double> or vector<vector<double>>
+//  since double size is hard-coded below!
+    
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/ndarray.html
+    np::dtype dt = np::dtype::get_builtin<double>();    // double hard-coded
+
+    //py::tuple shape = py::make_tuple(value.size());    // size gives only rows
+    py::tuple shape = py::make_tuple(rows,cols);
+
+    //py::tuple stride = py::make_tuple(sizeof(double));
+    //py::object own;
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/fromdata.html
+    // from_data uses the same location for both arrays in C and python
+    //np::ndarray arr = np::from_data (value,dt,shape,stride,own);
+    
+    np::ndarray arr = np::zeros(shape, dt);
+    // https://stackoverflow.com/questions/10701514/how-to-return-numpy-array-from-boostpython
+    // double hard-coded
+    std::copy(value.begin(), value.end(), reinterpret_cast<double*>(arr.get_data()));
+    return arr;
+}
+
+py::list writePyOutputStruct(vector<paramsStruct>& value) {
+    py::list outstruct;
+    int n = 0;
+    for (vector<paramsStruct>::iterator it = value.begin(); it != value.end(); ++it) {
+        for (int i=0; i < it->get_nfields(); i++) {
+            vector<double>* data = it->getFieldData(i);
+            int N = it->getFieldN(i);
+            int M = it->getFieldM(i);
+            np::dtype dt = np::dtype::get_builtin<double>();    // double hard-coded
+            py::tuple shape = py::make_tuple(N,M);
+            np::ndarray arr = np::zeros(shape, dt);
+            // double hard-coded
+            std::copy(data->begin(), data->end(), reinterpret_cast<double*>(arr.get_data()));
+            outstruct.append(arr);
+        }
+        n++;
+    }
+    return outstruct;
+}
+
+py::list writePyOutputStructDict(vector<paramsStruct>& value) {
+    py::list outlistdict;
+    int n = 0;
+    for (vector<paramsStruct>::iterator it = value.begin(); it != value.end(); ++it) {
+        py::dict outstruct;
+        for (int i=0; i < it->get_nfields(); i++) {
+            vector<double>* data = it->getFieldData(i);
+            int N = it->getFieldN(i);
+            int M = it->getFieldM(i);
+            np::dtype dt = np::dtype::get_builtin<double>();    // double hard-coded
+            py::tuple shape = py::make_tuple(N,M);
+            np::ndarray arr = np::zeros(shape, dt);
+            // double hard-coded
+            std::copy(data->begin(), data->end(), reinterpret_cast<double*>(arr.get_data()));
+            outstruct[it->getFieldName(i)] = arr;
+        }
+        n++;
+        outlistdict.append(outstruct);
+    }
+    return outlistdict;
+}
+
+vector<vector<double>> getSpikeTimes(py::list nrnspiketimes) {
+    int N = len(nrnspiketimes);
+    vector<vector<double>> st (N);
+    for (int i=0; i<N; i++) {
+        py::list spiketimes = py::extract<py::list>(nrnspiketimes[i]);
+        int nspikes = len(spiketimes);
+        for (int n=0; n<nspikes; n++) {
+            st[i].push_back(py::extract<double>(spiketimes[n]));
+        }
+    }
+    return st;
+}
+
+vector<double> getVec(np::ndarray arr) {
+    int input_size = arr.shape(0);
+    std::vector<double> v(input_size);
+    for (int i=0; i<input_size; ++i)
+        v[i] = py::extract<double>(arr[i]);
+    return v;
+}
+
+py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double binsize, int nbasins, int niter) {
+// params,w,samples,state_hist,P,prob,logli,P_test = pyEMBasins(spiketimes, spiketimes_test, binsize, nbasins, niter)
+ 
+// nrnspiketimes is a list of lists, nNeurons x nSpikeTimes (# of spike times is different for each neuron, so not an array
+// binsize is the number of samples per bin, @ 10KHz sample rate and a 20ms bin, binsize=200
+// nbasins is number of modes, around 70 for the data in Prentice et al 2016 for HMM & TreeBasin
+// niter is the number of times EM is repeated
+
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/index.html
+    // see: https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/object_wrappers/boost_python_list_hpp.html
+    //cout << py::len(st) << py::extract<double>(st[0]) << endl;
+
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/simple.html
+    // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
+    Py_Initialize();
+    np::initialize();
+  
+    cout << "Reading inputs..." << endl;
+    int N = len(nrnspiketimes);
+    vector<vector<double>> st = getSpikeTimes(nrnspiketimes);
+    vector<vector<double>> st_test = getSpikeTimes(nrnspiketimes_test);
+
+    // Mixture model
+    cout << "Initializing EM..." << endl;
+    EMBasins<BasinType> basin_obj(st, st_test, binsize, nbasins);
+        
+    cout << "Training model..." << endl;
+    vector<double> logli;
+    vector<double> test_logli;
+    tie(logli,test_logli) = basin_obj.train(niter);
+    //vector<double> test_logli = basin_obj.test_logli;
+    
+    // Aditya modified: I've added testing at each iter in train()
+    //  so no need of testing at the end of training
+    //cout << "Testing..." << endl;
+    //vector<double> P_test;
+    //double logli_test;
+    // ::test() returns P_test as nbasins x nbins,
+    // unlike ::P_test() or P() which return nbasins x npatterns
+    //tie(P_test,logli_test) = basin_obj.test(st_test,binsize);
+    
+    vector<paramsStruct> params = basin_obj.basin_params();
+    int nstates = basin_obj.nstates();
+    int nstates_test = basin_obj.nstates_test();
+    cout << nstates << " states." << endl;
+    
+//    cout << "Getting samples..." << endl;
+    int nsamples = 100000;
+    vector<char> samples = basin_obj.sample(nsamples);
+
+    cout << "Writing outputs..." << endl;    
+    py::list outlist = py::list();
+    
+    outlist.append(writePyOutputStructDict(params));
+    outlist.append(writePyOutputMatrix(basin_obj.w,1,nbasins));
+    outlist.append(writePyOutputMatrix(samples,nsamples,N));
+    outlist.append(writePyOutputMatrix(basin_obj.word_list(),nstates,N));
+    outlist.append(writePyOutputMatrix(basin_obj.state_hist(),1,nstates));
+    outlist.append(writePyOutputMatrix(basin_obj.word_list_test(),nstates_test,N));
+    outlist.append(writePyOutputMatrix(basin_obj.test_hist(),1,nstates_test));
+    // P and P_test are the Qmodes/Z (cf. my MixtureModel.py calcModePosterior())
+    //  for each state in train_states and test_states
+    outlist.append(writePyOutputMatrix(basin_obj.P(),nstates,nbasins));
+    outlist.append(writePyOutputMatrix(basin_obj.P_test(),nstates_test,nbasins));
+    // all_prob and test_prob are the Z's for each state in train_states and test_states
+    outlist.append(writePyOutputMatrix(basin_obj.all_prob(),1,nstates));
+    outlist.append(writePyOutputMatrix(basin_obj.test_prob(),1,nstates_test));
+    outlist.append(writePyOutputMatrix(logli,1,niter));
+    outlist.append(writePyOutputMatrix(test_logli,1,niter));
+    //outlist.append(logli_test);
+   
+    // Aditya notes: P and P_test correspond to my Qmodes/Z (see MixtureModel.py calcModePosterior())
+    //  dim is nModes x nStates i.e. nbasins here x number of distinct states
+    // However, my Qmodes is nModes x ntimesteps
+    // Still, can use the state/pattern at each time step to choose its P from this matrix
+    // To calculate log likelihood, I need Z at each time step/bin!
+    //  (w.Qmodes)/Z != w.P = w.(Qmodes/Z) won't work because P is normalized sum=1 at each time step
+   
+    return outlist;
+}
+
+void pyInit() {
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/simple.html
+    // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
+    Py_Initialize();
+    np::initialize();
+    cout << "Initialized python and numpy" << endl;
+}
+
+py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::ndarray & unobserved_edges_hi, double binsize, int nbasins, int niter) {
+// params,w,samples,state_hist,P,prob,logli,P_test = pyEMBasins(spiketimes, spiketimes_test, binsize, nbasins, niter)
+ 
+// nrnspiketimes is a list of lists, nNeurons x nSpikeTimes (# of spike times is different for each neuron, so not an array
+// binsize is the number of samples per bin, @ 10KHz sample rate and a 20ms bin, binsize=200
+// nbasins is number of modes, around 70 for the data in Prentice et al 2016 for HMM & TreeBasin
+// niter is the number of times EM is repeated
+
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/index.html
+    // see: https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/object_wrappers/boost_python_list_hpp.html
+    //cout << py::len(st) << py::extract<double>(st[0]) << endl;
+  
+    cout << "Reading inputs..." << endl;
+    int N = len(nrnspiketimes);
+    vector<vector<double>> st = getSpikeTimes(nrnspiketimes);
+
+    int n_unobserved_blocks = len(unobserved_edges_lo);
+    vector<double> unobserved_edges_low (n_unobserved_blocks);
+    vector<double> unobserved_edges_high (n_unobserved_blocks);
+    if (n_unobserved_blocks>0) {
+        unobserved_edges_low = getVec(unobserved_edges_lo);
+        unobserved_edges_high = getVec(unobserved_edges_hi);
+    }
+
+    // Hidden Markov model
+    HMM<BasinType> basin_obj(st, unobserved_edges_low, unobserved_edges_high, binsize, nbasins);
+    vector<double> train_logli;
+    vector<double> test_logli;
+    tie(train_logli,test_logli) = basin_obj.train(niter);
+    cout << "Viterbi..." << endl;
+    vector<int> alpha = basin_obj.viterbi(true);
+    cout << "P...." << endl;
+    vector<double> P = basin_obj.get_P();
+    cout << "Pred prob..." << endl;
+    pair<vector<double>, vector<double> > tmp = basin_obj.pred_prob();
+    vector<double> pred_prob = tmp.first;
+    vector<double> hist = tmp.second;
+//    vector<unsigned long> hist = basin_obj.state_hist();
+    int T = floor(P.size() / nbasins);
+
+    cout << "Params..." << endl;
+    vector<paramsStruct> params = basin_obj.basin_params();
+
+    cout << "Writing outputs..." << endl;    
+    py::list outlist = py::list();
+    
+    outlist.append(writePyOutputStructDict(params));
+    outlist.append(writePyOutputMatrix(basin_obj.get_trans(),nbasins,nbasins));
+    outlist.append(writePyOutputMatrix(P,T,nbasins));
+    outlist.append(writePyOutputMatrix(basin_obj.emiss_prob(),T,nbasins));
+    cout << "Microstates..." << endl;
+    // state_v_time() seg faults, see further notes in the function
+    //outlist.append(writePyOutputMatrix(basin_obj.state_v_time(),1,T));
+    outlist.append(writePyOutputMatrix(alpha,1,T));
+    outlist.append(writePyOutputMatrix(pred_prob,1,pred_prob.size()));
+    outlist.append(writePyOutputMatrix(hist,1,hist.size()));
+    outlist.append(writePyOutputMatrix(basin_obj.sample(100000),100000,N));
+    outlist.append(writePyOutputMatrix(basin_obj.word_list(),hist.size(),N));
+    outlist.append(writePyOutputMatrix(basin_obj.stationary_prob(),1,nbasins));
+    outlist.append(writePyOutputMatrix(train_logli,1,niter));
+    outlist.append(writePyOutputMatrix(test_logli,1,niter));
+   
+    return outlist;
+}
+
+BOOST_PYTHON_MODULE(EMBasins)
+{
+   using namespace boost::python;
+   def("pyEMBasins",pyEMBasins);
+   def("pyHMM",pyHMM);
+   def("pyInit",pyInit);
+}
+
+#endif
 
 RNG::RNG() {
     // Initialize mersenne twister RNG
@@ -286,10 +574,9 @@ EMBasins<BasinT>::EMBasins(int N, int nbasins) : N(N), nbasins(nbasins), w(nbasi
 
 
 template <class BasinT>
-EMBasins<BasinT>::EMBasins(vector<vector<double> >& st, double binsize, int nbasins) : nbasins(nbasins), nsamples(0), w(nbasins) {
+EMBasins<BasinT>::EMBasins(vector<vector<double>>& st, vector<vector<double>>& st_test, double binsize, int nbasins) : nbasins(nbasins), nsamples(0), w(nbasins) {
     
     rng = new RNG();
-    
     
     N = st.size();
     //srand(time(NULL));
@@ -331,7 +618,7 @@ EMBasins<BasinT>::EMBasins(vector<vector<double> >& st, double binsize, int nbas
             if (!ins.second) {
                 (((ins.first)->second).freq)++;
             }
-
+            
             // All states between curr_bin and next_bin (exclusive) are silent; update frequency of silent state accordingly
             for (int i=0; i<(next_bin-curr_bin-1); i++) {
                 raster.push_back(silent_str);
@@ -357,17 +644,97 @@ EMBasins<BasinT>::EMBasins(vector<vector<double> >& st, double binsize, int nbas
         }
         
     }
+
+    // Aditya notes: the very last state doesn't get added above, so add it at the end
+    // Add new state; if it's already been discovered increment its frequency
+    this_state.active_constraints = BasinT::get_active_constraints(this_state);
+    raster.push_back(this_str);
+    pair<state_iter, bool> ins = all_states.insert(pair<string,State> (this_str,this_state));
+    if (!ins.second) {
+        (((ins.first)->second).freq)++;
+    }
+
+    // if silent state was not present, remove it
     if (all_states[silent_str].freq == 0) {
         all_states.erase(silent_str);
     }
     
-    // Now all_states contains all states found in the data together with their frequencies.
+    // Now all_states contains all distinct states in the training data together with their frequencies.
     
     for (state_iter it=all_states.begin(); it!=all_states.end(); ++it) {
         nsamples += (it->second).freq;
     }
     
     train_states = all_states;
+
+    // Aditya added notes: I moved this from ::test() to build up test_states
+    cout << "Building test states histogram..." << endl;
+    
+    vector<Spike> test_spikes = sort_spikes(st_test,binsize);
+
+    // Add silent state with frequency of zero
+    this_str = silent_str;
+    this_state.freq = 0;
+    this_state.on_neurons.clear();
+    this_state.P.assign(nbasins, 0);
+    this_state.weight.assign(nbasins,0);
+    this_state.word.assign(N,0);
+    
+    curr_bin = 0;
+    for (vector<Spike>::iterator it=test_spikes.begin(); it!=test_spikes.end(); ++it) {
+        
+        int next_bin = it->bin;
+        int next_cell = it->neuron_ind;
+        
+        if (next_bin > curr_bin) {
+            // Add new state; if it's already been discovered increment its frequency
+            this_state.active_constraints = BasinT::get_active_constraints(this_state);
+            pair<state_iter, bool> ins = test_states.insert(pair<string,State> (this_str,this_state));
+            if (!ins.second) {
+                (((ins.first)->second).freq)++;
+            }
+            
+            // All states between curr_bin and next_bin (exclusive) are silent; update frequency of silent state accordingly
+            test_states[silent_str].freq += (next_bin - curr_bin - 1);
+            
+            // unlike for the train bins above, the test bins are not pushed to 'raster'
+            
+            // Reset state and jump to next bin
+            this_str = silent_str;
+            this_state.freq = 1;
+            this_state.on_neurons.clear();
+            this_state.P.assign(nbasins,0);
+            this_state.weight.assign(nbasins,0);
+            this_state.word.assign(N,0);
+            
+            curr_bin = next_bin;
+        }
+        
+        // Add next_cell to this_state
+        if (this_state.word[next_cell] == 0) {  // Don't want to count a cell twice in one bin
+            this_str[next_cell] = '1';
+            this_state.on_neurons.push_back(next_cell);
+            this_state.word[next_cell] = 1;
+        }
+        
+    }
+
+    // Aditya notes: the very last state doesn't get added above, so add it at the end
+    // Add new state; if it's already been discovered increment its frequency
+    this_state.active_constraints = BasinT::get_active_constraints(this_state);
+    raster.push_back(this_str);
+    ins = test_states.insert(pair<string,State> (this_str,this_state));
+    if (!ins.second) {
+        (((ins.first)->second).freq)++;
+    }
+
+    // if silent state was not present above, remove it
+    if (test_states[silent_str].freq == 0) {
+        test_states.erase(silent_str);
+    }
+
+    // Aditya added ends
+
 };
 
 template <class BasinT>
@@ -377,7 +744,7 @@ EMBasins<BasinT>::~EMBasins() {
 
 
 template <class BasinT>
-vector<double> EMBasins<BasinT>::test(const vector<vector<double> >& st, double binsize) {
+tuple<vector<double>,double> EMBasins<BasinT>::test(const vector<vector<double> >& st, double binsize) {
     
     vector<Spike> all_spikes = sort_spikes(st,binsize);
     int max_bin = all_spikes.back().bin;
@@ -408,6 +775,9 @@ vector<double> EMBasins<BasinT>::test(const vector<vector<double> >& st, double 
         if (next_bin > curr_bin) {
             // Add new state; if it's already been discovered increment its frequency
             this_state.active_constraints = BasinT::get_active_constraints(this_state);
+            // Aditya notes: set_state_P sets this_state.P[i]
+            //  to Qmodes[i,next_bin]/Z (see MixtureModel.py calcModePosterior())
+            //  where i indexes modes, and this_state occurs in next_bin
             set_state_P(this_state);
             pair<state_iter, bool> ins = eval_states.insert(pair<string,State> (this_str,this_state));
             if (!ins.second) {
@@ -417,8 +787,11 @@ vector<double> EMBasins<BasinT>::test(const vector<vector<double> >& st, double 
             
             // Update probabilities of time bins [curr_bin, next_bin)
             for (int i=0; i<nbasins; i++) {
+                // Aditya notes: P_test is Qmodes/Z for this state/bin
                 P_test[nbasins*curr_bin + i] = this_state.P[i];
                 for (int n=curr_bin+1; n<next_bin; n++) {
+                    // Aditya notes: all states between curr_bin and next_bin are silent states,
+                    //  set P_test for these intermediate bins to Qmodes/Z for the silent state
                     P_test[nbasins*n + i] = eval_states[silent_str].P[i];
                 }
             }
@@ -446,12 +819,23 @@ vector<double> EMBasins<BasinT>::test(const vector<vector<double> >& st, double 
         }
         
     }
-    if (all_states[silent_str].freq == 0) {
-        all_states.erase(silent_str);
+    // Aditya modified begins
+    //if (all_states[silent_str].freq == 0) {
+    //    all_states.erase(silent_str);
+    //}
+    // should be eval_states, not all_states I think
+    if (eval_states[silent_str].freq == 0) {
+        eval_states.erase(silent_str);
     }
+    // Aditya modifed ends
     
-    return P_test;
-
+    // Aditya modified begins
+    //return P_test;
+    
+    test_states = eval_states;
+    test_logli = update_P_test();
+    return make_tuple(P_test,test_logli);
+    // Aditya modified ends
 }
 
 
@@ -488,7 +872,7 @@ vector<double> EMBasins<BasinT>::crossval(int niter, int k) {
 }
 
 template <class BasinT>
-vector<double> EMBasins<BasinT>::train(int niter) {
+tuple< vector<double>, vector<double> > EMBasins<BasinT>::train(int niter) {
 
     cout << "Initializing EM params..." << endl;
     w.assign(nbasins,1/(double)nbasins);
@@ -537,8 +921,7 @@ vector<double> EMBasins<BasinT>::train(int niter) {
         logli[i] = update_P();
         test_logli[i] = update_P_test();
     }
-//    return test_logli;
-    return logli;
+    return make_tuple(logli,test_logli);
 }
 
 template <class BasinT>
@@ -557,16 +940,59 @@ double EMBasins<BasinT>::update_P() {
     double norm = 0;
     for (state_iter it=train_states.begin(); it != train_states.end(); ++it) {
         State& this_state = it->second;
-        double Z = set_state_P(this_state);        
+        // set_state_P updates this_state.P
+        double Z = set_state_P(this_state);
+        // Aditya notes: why subtract the running logli here?!
+        // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
         double delta = log(Z) - logli;
         double f = this_state.freq;
         norm += f;
+        // Aditya notes: why /norm within the loop over patterns?!
+        // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
         logli += (f*delta)/norm;
     }
+    // Aditya notes: why not logli = (1/norm) * sum_patterns (freq_pattern*logZ) ?
+    // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
     return logli;
     
 }
 
+// Aditya notes: added this update_P_test similar to training update_P() above
+//  the original update_P_test commented below uses log2(Z) instead of log(Z) and gives lower test logli!
+template <class BasinT>
+double EMBasins<BasinT>::update_P_test() {
+    
+    double logli = 0;
+    double norm = 0;
+    // don't use epsilon ~ 10^-16, use min ~ 10^-308
+    // see https://en.cppreference.com/w/cpp/types/numeric_limits
+    double logmin = log( std::numeric_limits<double>::min() );
+    for (state_iter it=test_states.begin(); it != test_states.end(); ++it) {
+        State& this_state = it->second;
+        // set_state_P updates this_state.P
+        double logZ = log( set_state_P(this_state) );
+        // Aditya notes: added this else nan in logli
+        if (isinf(logZ)) {
+            logZ = logmin;
+        }
+        // Aditya notes: why subtract the running logli here?!
+        // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
+        double delta = logZ - logli;
+        double f = this_state.freq;
+        norm += f;
+        if (f >= 1) {
+            // Aditya notes: why /norm within the loop over patterns?!
+            // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
+            logli += (f*delta)/norm;
+        }
+    }
+    // Aditya notes: why not logli = (1/norm) * sum_patterns (freq_pattern*logZ) ?
+    // this is an online/running mean -- see my explanation in HMM<BasinT>::logli() below
+    return logli;
+    
+}
+
+/*
 template <class BasinT>
 double EMBasins<BasinT>::update_P_test() {
     
@@ -594,7 +1020,7 @@ double EMBasins<BasinT>::update_P_test() {
     return logli;
     
 }
-
+*/
 
 
 template <class BasinT>
@@ -655,12 +1081,32 @@ vector<double> EMBasins<BasinT>::P() const {
         const State& this_state = it->second;
         
         for (int i=0; i<nbasins; i++) {
+            // this_state.P was already updated on calling update_P() as part of train()
+            // update_P() called set_state_P() for each train_state
             P[pos*nbasins + i] = this_state.P[i];
         }
         pos++;
     }
     return P;
 }
+
+template <class BasinT>
+vector<double> EMBasins<BasinT>::P_test() const {
+    vector<double> P_test (test_states.size() * nbasins, 0);
+    unsigned long pos = 0;
+    for (const_state_iter it=test_states.begin(); it != test_states.end(); ++it) {
+        const State& this_state = it->second;
+        
+        for (int i=0; i<nbasins; i++) {
+            // this_state.P was already updated on calling update_P_test as part of train()
+            // update_P_test() called set_state_P() for each test_state
+            P_test[pos*nbasins + i] = this_state.P[i];
+        }
+        pos++;
+    }
+    return P_test;
+}
+
 
 template <class BasinT>
 vector<paramsStruct> EMBasins<BasinT>::basin_params() {
@@ -680,6 +1126,9 @@ vector<char> EMBasins<BasinT>::sample(int nsamples) {
     for (int i=0; i<nsamples; i++) {
         int basin_ind = rng->discrete(w);
         vector<char> this_sample = basins[basin_ind].sample();
+        // Aditya notes: Careful, the samples "matrix" must be interpreted as (nTimeBins x nNeurons)
+        //  samples is represented as a vector here with minor increments (inner loop) for neurons and major (outer loop) for timebins
+        //  I've assumed row-major i.e. the C++ default in writePyOutputMatrix
         for (int n=0; n<N; n++) {
             samples[i*N+n] = this_sample[n];
         }
@@ -732,6 +1181,18 @@ vector<char> EMBasins<BasinT>::word_list() {
     return out;
 }
 
+template <class BasinT>
+vector<char> EMBasins<BasinT>::word_list_test() {
+    vector<char> out (test_states.size() * N);
+    vector<char>::iterator out_it = out.begin();
+    for (state_iter it = test_states.begin(); it != test_states.end(); ++it) {
+        vector<char> word = (it->second).word;
+        for (vector<char>::iterator w_it = word.begin(); w_it!=word.end(); ++w_it) {
+            *out_it++ = *w_it;
+        }
+    }
+    return out;
+}
 
 
 // ************* HMM **********************
@@ -888,6 +1349,11 @@ template <class BasinT>
 vector<int> HMM<BasinT>::state_v_time() {
     vector<int> states (T);
     for (int t=0; t<T; t++) {
+        // Aditya notes: in the first iter i.e. t=0,
+        //  the line below produces a seg fault
+        //  I suppose state_list[0]->identifier is not defined?
+        //  Indeed where ever state_list[...] in used in other functions,
+        //   it is first checked for validity: if (state_list[i]) { ...
         states[t] = state_list[t]->identifier;
     }
     return states;
@@ -922,7 +1388,7 @@ vector<double> HMM<BasinT>::get_backward() {
 }
 
 template <class BasinT>
-vector<double> HMM<BasinT>::train(int niter) {
+tuple <vector<double>, vector<double> > HMM<BasinT>::train(int niter) {
     
     cout << "Initializing EM params..." << endl;
     
@@ -994,12 +1460,11 @@ vector<double> HMM<BasinT>::train(int niter) {
         update_trans();
 
         cout << "logli" <<endl;
-//        train_logli[i] = logli(true);
+        train_logli[i] = logli(true);
         test_logli[i] = logli(false);
         //test_logli[i] = update_P_test();
     }
-    return test_logli;
-//    return train_logli;
+    return make_tuple(train_logli, test_logli);
 }
 
 
@@ -1272,20 +1737,48 @@ double HMM<BasinT>::logli(bool obs) {
     vector<int> alpha = viterbi(obs);
 //    State& init_state = this->train_states.at(words[0]);
 
-
     vector<double> emiss = emiss_obs(obs, tskip-1);
+    // don't use epsilon ~ 10^-16, use min ~ 10^-308
+    // see https://en.cppreference.com/w/cpp/types/numeric_limits
+    double logmin = log( std::numeric_limits<double>::min() );
     double logli = log(w0[alpha[tskip-1]] * emiss[alpha[tskip-1]]);
-        
-
+    // Aditya note: w0 ~= 0 or emiss ~= 0 causes -inf, thence nan's,
+    //  so lower bound to min representable positive number
+    if (isinf(logli)) {
+        logli = logmin;
+    }
 
     for (int t=2*tskip-1; t<T; t+=tskip) {
 //        State& this_state = this->train_states.at(words[t]);
         emiss = emiss_obs(obs, t);
-        double delta = log(trans[alpha[t-tskip]*this->nbasins + alpha[t]]) + log(emiss[alpha[t]]) - logli;;
+        // Aditya notes: why subtract -logli at each time step!?
+        // Basically, they're doing an online i.e. running mean as each data point arrives (useful if tskip > 1).
+        // At time step t, suppose mean was correct, i.e. already divided by t,
+        //  then at time step t+1, you want the previous mean to be multiplied by t/(t+1) to get an overall /(t+1).
+        // mean_0 = val_0
+        // mean_{t+1} = val_{t+1} /(t+1) + mean_t * t/(t+1) 
+        //            =  val_{t+1} /(t+1) + mean_t (1 - 1/(t+1))
+        //            = ( val_{t+1} - mean_t )/(t+1) + mean_t
+        //            = delta_{t+1} /(t+1) + mean_t,     where delta_{t+1} = val_{t+1} - mean_t
+        double logemiss = log(emiss[alpha[t]]);
+        // Aditya note: emiss or trans ~= 0 causes -inf, thence nan's,
+        //  so lower bound to min representable positive number
+        if (isinf(logemiss)) {
+            logemiss = logmin;
+        }
+        double logtrans = log(trans[alpha[t-tskip]*this->nbasins + alpha[t]]);
+        if (isinf(logtrans)) {
+            logtrans = logmin;
+        }
+        double delta = logtrans + logemiss - logli;
+        // Aditya notes: for non-running mean, below RHS is val_{t+1} in explanation above
+        //double delta = log(trans[alpha[t-tskip]*this->nbasins + alpha[t]]) + log(emiss[alpha[t]]);
 
         logli += delta / (((t-1)/tskip)+1);
+        // logli += delta;  // Aditya notes: for non-running mean (assumed tskip=1)
     }
     return logli;
+    //return logli/T;       // Aditya notes: normalize at end for non-running mean
     
 //    State& final_state = this->train_states.at(words[T-1]);
 //    vector<double> logli (this->nbasins, 0);
@@ -1473,6 +1966,10 @@ vector<char> HMM<BasinT>::sample(int nsamples) {
         }
         basin_ind = (this->rng)->discrete(this_trans);
         this_sample = (this->basins)[basin_ind].sample();
+        // Aditya notes: Careful, the samples "matrix" (nNeurons x nTimeBins)
+        //  is represented as a vector here and is filled in column-major format below
+        //  whereas C++ default is row-major and that's what I've assumed in writePyOutputMatrix
+        //  so after passing to python, be sure to convert to row-major, else fiasco!
         for (int n=0; n<this->N; n++) {
             samples[t*this->N + n] = this_sample[n];
         }
@@ -1986,4 +2483,3 @@ vector<double> Autocorr<BasinT>::get_basin_trans() {
     }
     return basin_trans_out;
 }
-
