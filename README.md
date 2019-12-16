@@ -40,13 +40,11 @@ Also matlab complained when mex-ing, and suggested -fPIC
     
 Now in matlab, as per Adrianna's Documentation_TreeHMMcode.pdf:  
 `mex -largeArrayDims -I/usr/local/include -I/usr/local/Cellar/boost/1.68.0 -lgsl -lgslcblas EMBasins.cpp BasinModel.o TreeBasin.o`  
-You will need Boost libraries to compile (set available version above).  
+You will need Boost libraries to compile (set available version in mex-ing command above).  
   
-Now copy EMBasins.mexa64 (note Adrianna's one had mexmaci, not mexa -- it was for mac) to the working directory, and run Matlab from there.  
-In matlab on the CLI, I tried: params = EMBasins(), now it crashed with an internal error,  
- but I think that's because I didn't pass any params!  
- At least, it doesn't say EMBasins not found.  
-
+Now copy EMBasins.mexa64 (on Mac .mexmaci, not .mexa) to the working directory, and run Matlab from there.  
+In matlab on the CLI, you can run: params = EMBasins(...). See fit_prentice.m for an example.  
+  
 From matlab when EMBasins() is called, actually the mexFunction() inside EMBasins.cpp gets called. See:  
 https://www.mathworks.com/help/matlab/apiref/mexfunction.html  
 Currently mexFunction() creates an HMM model.  
