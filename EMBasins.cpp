@@ -495,7 +495,7 @@ py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::nd
     cout << "Params..." << endl;
     vector<paramsStruct> params = basin_obj.basin_params();
 
-    cout << "Writing outputs..." << endl;    
+    cout << "Writing outputs..." << endl;
     py::list outlist = py::list();
     
     outlist.append(writePyOutputStructDict(params));
@@ -509,11 +509,14 @@ py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::nd
     outlist.append(writePyOutputMatrix(pred_prob,1,pred_prob.size()));
     outlist.append(writePyOutputMatrix(hist,1,hist.size()));
     outlist.append(writePyOutputMatrix(basin_obj.sample(100000),100000,N));
-    outlist.append(writePyOutputMatrix(basin_obj.word_list(),hist.size(),N));
+    // don't return basin_obj.word_list(), I got python:free():invalid pointer error
+    //  sometimes on `return outlist` on the second call to pyHMM
+    //outlist.append(writePyOutputMatrix(basin_obj.word_list(),hist.size(),N));
     outlist.append(writePyOutputMatrix(basin_obj.stationary_prob(),1,nbasins));
     outlist.append(writePyOutputMatrix(train_logli,1,niter));
     outlist.append(writePyOutputMatrix(test_logli,1,niter));
    
+    cout << "Returning from C++!" << endl;
     return outlist;
 }
 
