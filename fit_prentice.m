@@ -106,8 +106,8 @@ else % with temporal correlations
         Output.train_logli= train_logli;
         Output.test_logli = test_logli;
         Output.trans      = trans;
-        Ouput.P           = P;
-        Output.P_emiss    = emiss_prob;
+        Output.P          = P;
+        Output.emiss_prob = emiss_prob;
         Output.alpha      = alpha;
         Output.pred_prob  = pred_prob;
         Output.hist       = hist;
@@ -127,8 +127,8 @@ else % with temporal correlations
         Output.train_logli= train_logli;
         Output.test_logli = test_logli;
         Output.trans      = trans;
-        Ouput.P           = P;
-        Output.P_emiss    = emiss_prob;
+        Output.P          = P;
+        Output.emiss_prob = emiss_prob;
         Output.alpha      = alpha;
         Output.pred_prob  = pred_prob;
         Output.hist       = hist;
