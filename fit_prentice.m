@@ -1,13 +1,16 @@
 close all;
 clear all;
 
-filename = "../UnsupervisedLearningNeuralData/Learnability_data/IST-2017-61-v1+1_bint_fishmovie32_100";
-%filename = "~/Documents/Projects/MaximumEntropy/Olivier/fishmovie32/bint_fishmovie32_100";
-retinaData = load(filename+".mat",'bint');
+loaddir = "../UnsupervisedLearningNeuralData/Learnability_data/"
+filename = "IST-2017-61-v1+1_bint_fishmovie32_100";
+%loaddir = "~/Documents/Projects/MaximumEntropy/Olivier/fishmovie32/"
+%filename = "bint_fishmovie32_100";
+retinaData = load(loaddir+filename+".mat",'bint');
 
 %binsize = 200; % binsize is # of samples / 20 ms time bin @ 10 kHz sampling rate.
 binsize = 1;
 nbasins = 70;
+niter = 100;
 
 spikeRaster = retinaData.bint;
 
@@ -44,7 +47,6 @@ if matlabHMM == 0 % without temporal correlations
         end
     end
 
-
     % validation/test set is statistically very different from training set --
     %  I got poor test log-likelihood despite high training log-likelihood
     % maybe because similar images were presented temporally together during the experiment?
@@ -53,13 +55,13 @@ if matlabHMM == 0 % without temporal correlations
     %shuffled_idxs = np.random.permutation(np.arange(tSteps,dtype=np.int32))
     %spikeRaster = spikeRaster[:,shuffled_idxs]
 
-    [Pw, params, samples, P_emp, condP, P_model, LL_train, LL_test] =  EMBasins(nrnSpikeTimes, nrnSpikeTimesTest, binsize, nbasins, 100);
+    [Pw, params, samples, P_emp, condP, P_model, LL_train, LL_test] = ...
+        EMBasins(nrnSpikeTimes, nrnSpikeTimesTest, binsize, nbasins, niter);
 
 else % with temporal correlations
 
     %% -- Initilize Specifications --
-    A.Nc          = 1;            %Defines Nc-fold cross-validation (for HMM only)
-    A.niter       = 100;          %# of iterations of the EM algorithm
+    Nc            = 2;            %Defines Nc-fold cross-validation (for HMM only)
 
     [numtrials,numneurons,numbins] = size(spikeRaster);
     bins = 1:numbins*numtrials;
@@ -74,18 +76,18 @@ else % with temporal correlations
 
     goodcells = 1:length(nrnSpikeTimes); 
 
-    if A.Nc>1 %HMM syntax w/ Cross-Val
+    if Nc>1 %HMM syntax w/ Cross-Val
         % -- Compute Time Bin Indices for Nc-Fold Cross-Validation: -- 
-        tmax = max(cell2mat(cellfun(@(x) max(double(x)), st, ...
+        tmax = max(cell2mat(cellfun(@(x) max(double(x)), nrnSpikeTimes, ...
                    'UniformOutput', 0))); %tmax is in units of 10 kHz
 
         bins         = 0:binsize:tmax;
         s            = RandStream('mt19937ar','Seed',0);
         shuffle_bins = randperm(s,length(bins));
-        ntest        = floor(length(bins)/A.Nc);
+        ntest        = floor(length(bins)/Nc);
 
         %- Computations: -- 
-        for k = 1:A.Nc
+        for k = 1:Nc
 
         testbins   = shuffle_bins((k-1)*ntest+1:k*ntest);
         train_bins = zeros(1,length(bins));
@@ -97,9 +99,10 @@ else % with temporal correlations
             unobserved_hi = [unobserved_hi, tmax]; %#ok
         end
 
-        [params,trans,P,emiss_prob,alpha,pred_prob,hist,sample,stationary_prob,train_logli(:,k),test_logli(:,k)] = ...
-            EMBasins(nrnSpikeTimes(goodcells), [unobserved_low', unobserved_hi'], ...
-            binsize, nbasins, A.niter); %#ok
+        [params,trans,P,emiss_prob,alpha,pred_prob,hist,sample,...
+            stationary_prob,train_logli(:,k),test_logli(:,k)] = ...
+                EMBasins(nrnSpikeTimes(goodcells), [unobserved_low', unobserved_hi'], ...
+                    binsize, nbasins, niter); %#ok
         end %for
         
         % -- Save: --
@@ -114,14 +117,14 @@ else % with temporal correlations
         Output.params     = params;
         Output.sample     = sample;
         Output.stationary_prob = stationary_prob;
-        savename = ['HMM_Params_' ...
-                    '_nb' num2str(nbasins) '_' num2str(A.Nc) 'cv.mat'];
-        save([loaddir savename],'Output');
+        savename = "HMM_Params"+"_nb"+num2str(nbasins)+"_"+num2str(Nc)+"cv.mat";
+        save(loaddir+savename,'Output');
         
-    elseif A.Nc==1 %Use ALL data to determine params
+    elseif Nc==1 %Use ALL data to determine params
         
-        [params,trans,P,emiss_prob,alpha,pred_prob,hist,sample,stationary_prob,train_logli,test_logli] = ...
-            EMBasins(nrnSpikeTimes(goodcells), [], binsize, nbasins, A.niter); 
+        [params,trans,P,emiss_prob,alpha,pred_prob,hist,sample,...
+            stationary_prob,train_logli,test_logli] = ...
+                EMBasins(nrnSpikeTimes(goodcells), [], binsize, nbasins, niter); 
         
         % -- Save: --
         Output.train_logli= train_logli;
@@ -136,9 +139,8 @@ else % with temporal correlations
         Output.sample     = sample;
         Output.stationary_prob = stationary_prob;
 
-        savename = ['HMM_Params' ...
-                    '_nb' num2str(nbasins) '.mat'];
-        save([loaddir savename],'Output');
+        savename = "HMM_Params"+"_nb"+num2str(nbasins)+".mat";
+        save(loaddir+savename,'Output');
     end
 
 end
