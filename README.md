@@ -1,6 +1,16 @@
 The C++ code and Matlab mex bindings are from Adrianna Loback's repo [https://github.com/adriannaloback/TreeHMM-local](https://github.com/adriannaloback/TreeHMM-local), which is the code for the paper:  
 Prentice, Jason S., Olivier Marre, Mark L. Ioffe, Adrianna R. Loback, Gašper Tkačik, and Michael J. Berry II. 2016. “Error-Robust Modes of the Retinal Population Code.” PLOS Computational Biology 12 (11): e1005148. [https://doi.org/10.1371/journal.pcbi.1005148](https://doi.org/10.1371/journal.pcbi.1005148).  
   
+Compared to the original bindings, I've made some changes:
+1. Wrote python bindings to both HMM and EMBasins i.e. with and without temporal correlations (no re-compiling C++ code).  
+  Note also the typedef `<TreeBasin/IndependentBasin> BasinType` directive in `EMBasins.cpp` for turning spatial correlations on and off (need to recompile C++ code).  
+  See below.  
+2. Modfied Matlab bindings to call HMM or TreeBasins by switching the `#define matlabHMM` directive in `EMBasins.cpp` (need to recompile C++ code).  
+  See below.  
+3. Return a few more outputs like test-log-likelihood etc. via the bindings.
+4. Avoid nan / inf -s in computing log likelihood, by checking for small numbers and replacing them by `double min = std::numeric_limits<double>::min();`
+5. Added comments to clarify the code / issues
+
 -------------  
   
 # Python bindings added  
@@ -31,9 +41,12 @@ Thus you can switch from pyHMM to pyEMBasins, without recompiling, to remove tim
 -------------  
   
 # Matlab bindings  
-The Matlab bindings should work as well (they were last tested by AG a while ago, hopefully no changes were made in the C++ class/function signatures since then!). If not, then use the code from the [original repo](https://github.com/adriannaloback/TreeHMM-local).   
+The Matlab bindings should work as well. If not, then use the code from the [original repo](https://github.com/adriannaloback/TreeHMM-local).   
 Just comment `#define PYTHON` in `EMBasins.cpp`, and uncomment `#define MATLAB`.  
-First compile BasinModel.cpp, etc. for linux. Just compile, don't link, hence -c:  
+First you need to compile BasinModel.cpp, etc.
+
+On linux:  
+Just compile, don't link, hence -c:  
 EMBasins.cpp uses Matlab's matrix.h and mex.h, hence the -I, see:  
  [https://www.mathworks.com/help/matlab/matlab_external/mat-file-library-and-include-files.html](https://www.mathworks.com/help/matlab/matlab_external/mat-file-library-and-include-files.html)  
 Also matlab complained when mex-ing, and suggested -fPIC  
@@ -42,14 +55,30 @@ Also matlab complained when mex-ing, and suggested -fPIC
 `g++  -fPIC -c TreeBasin.cpp`  
 .o files are created and we don't need to link them, as we will mex them for Matlab.  
     
+On Mac:  
+You first need to install boost
+`brew install boost --with-python`  
+Then compile the C++ files as below, be sure to add the '-std=c++0x' directive, else you'll get some errors (thanks to Gasper for this tip!).  
+`g++ -std=c++0x -fPIC -c EMBasins.cpp`  
+`g++ -std=c++0x -fPIC -c BasinModel.cpp`  
+`g++ -std=c++0x -fPIC -c TreeBasin.cpp`  
+    
 Now in matlab, as per Adrianna's Documentation_TreeHMMcode.pdf:  
 `mex -largeArrayDims -I/usr/local/include -I/usr/local/Cellar/boost/1.68.0 -lgsl -lgslcblas EMBasins.cpp BasinModel.o TreeBasin.o`  
-You will need Boost libraries to compile (set available version in mex-ing command above).  
+You will need Boost libraries (can install as above with brew) to compile (set available version in mex-ing command above).  
   
-Now copy EMBasins.mexa64 (on Mac .mexmaci, not .mexa) to the working directory, and run Matlab from there.  
-In matlab on the CLI, you can run: params = EMBasins(...). See fit_prentice.m for an example.  
+Now copy EMBasins.mexa64 on linux (.mexmaci instead of .mexa on mac) to the working directory, and run Matlab from there.  
+In matlab on the CLI, you can run: ... = EMBasins(...).  
+See fit_prentice.m (thanks to Gasper for a bugfix!)  
+ for examples of how to use with HMM or EMBasins (with or without temporal correlations).  
   
 From matlab when EMBasins() is called, actually the mexFunction() inside EMBasins.cpp gets called. See:  
 https://www.mathworks.com/help/matlab/apiref/mexfunction.html  
-Currently mexFunction() creates an HMM model.  
+The mexFunction called is always EMBasins() as per the EMBasins.cpp filename,  
+ but internally in EMBasins.cpp, you should #define matlabHMM or not.    
   
+Currently mexFunction() creates an HMM model.  
+Comment the `#define matlabHMM` line in EMBasins.cpp to turn off temporal correlations.  
+Comment / uncomment `typedef <...> BasinType` lines to flip spatial correlations.  
+  
+------------

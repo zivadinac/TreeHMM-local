@@ -13,13 +13,18 @@
 #include "TreeBasin.h"
 
 // Choose either MATLAB or PYTHON to link to via Boost
-//#define MATLAB
-#define PYTHON
-
+#define MATLAB
+//#define PYTHON
 
 #ifdef MATLAB
 #include "matrix.h"
 #include "mex.h"
+// Comment this if you want just EMBasins (i.e. no temporal correlations)
+// Leave uncommented if you want HMM i.e. temporal correlations
+// Only applies to Matlab as it allows binding only one function named mexFunction,
+//  whereas python allows separate bindings for pyHMM and pyEMBasins, etc.
+#define matlabHMM
+// See below: typedef <...> BasinType for spatial correlations
 #endif
 
 #include <queue>
@@ -101,9 +106,12 @@ vector<double> mpow(vector<double>& matrix, int n, int k) {
 #ifdef MATLAB
 
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
+ // #ifdef matlabHMM, then this function uses temporal correlations, i.e. uses HMM(),
+ // and signature from matlab is as below
  // [freq,w,m,P,logli,prob] = EMBasins(st, unobserved_edges, binsize, nbasins, niter)
- // returned params are wrong in number and order I think,
- //  see at the end of this function for what is actually returned!
+ // #ifndef matlabHMM, then this function doesn't use temporal correlations, i.e. uses EMBasins(),
+ // and signature from matlab is as below
+ // [freq,w,m,P,logli,prob] = EMBasins(st, st_test, unobserved_edges, binsize, nbasins, niter)
 
     cout << "Reading inputs..." << endl;
     int N = mxGetNumberOfElements(prhs[0]);
@@ -117,7 +125,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
         }
     }
 
-/*    
+#ifdef matlabHMM
     int n_unobserved_blocks = mxGetM(prhs[1]);
     vector<double> unobserved_edges_low (n_unobserved_blocks);
     vector<double> unobserved_edges_high (n_unobserved_blocks);
@@ -130,18 +138,24 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
             unobserved_edges_high[n] = unobserved_edges_pr[n_unobserved_blocks + n];
         }
     }
-*/
+#endif
 
-/*
+#ifndef matlabHMM
+    int N1 = mxGetNumberOfElements(prhs[1]);
+    vector<vector<double> > st_test (N1);    
+    for (int i=0; i<N1; i++) {
+        mxArray* elem = mxGetCell(prhs[1], i);
+        double* elem_pr = mxGetPr(elem);
+        int nspikes = mxGetNumberOfElements(elem);
+        for (int n=0; n<nspikes; n++) {
+            st_test[i].push_back(elem_pr[n]);
+        }
+    }
+#endif
+
     double binsize = *mxGetPr(prhs[2]);
     int nbasins = (int) *mxGetPr(prhs[3]);
-    int niter = (int) *mxGetPr(prhs[4]);
-*/
-
-    double binsize = *mxGetPr(prhs[1]);
-    int nbasins = (int) *mxGetPr(prhs[2]);
-    int niter = (int) *mxGetPr(prhs[3]);
-    
+    int niter = (int) *mxGetPr(prhs[4]);    
 
   /*
     // Autocorrelation model
@@ -181,12 +195,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 //    writeOutputMatrix(3, basin_obj.sample(100000), N,100000, plhs);
     */
     
-/*    
+#ifdef matlabHMM
     // Hidden Markov model
     HMM<BasinType> basin_obj(st, unobserved_edges_low, unobserved_edges_high, binsize, nbasins);
-    // Aditya notes: I modified train(), it now returns a tuple of vector<double>
-    //  see below pyHMM for usage.
-    vector<double> logli = basin_obj.train(niter);
+    vector<double> train_logli;
+    vector<double> test_logli;
+    tie(train_logli,test_logli) = basin_obj.train(niter);
     cout << "Viterbi..." << endl;
     vector<int> alpha = basin_obj.viterbi(true);
     cout << "P...." << endl;
@@ -200,30 +214,40 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
     cout << "Params..." << endl;
     vector<paramsStruct> params = basin_obj.basin_params();
-    
-    writeOutputMatrix(0, logli, niter, 1, plhs);
+
+    cout << "Writing outputs..." << endl;    
+    // NOTE: matlab uses column-major while C/C++ uses row-major order
+    // Thus, call as writeOutputMatrix(plhs_index, Cmatrix, Ccolumn, Crow, plhs)
+    // Ccolumn then Crow not the other way around!
+    writeOutputStruct(0, params, plhs);
     writeOutputMatrix(1, basin_obj.get_trans(), nbasins, nbasins, plhs);
-//    writeOutputMatrix(2, P, nbasins, T, plhs);
-    writeOutputMatrix(2, basin_obj.emiss_prob(), nbasins, T, plhs);
-//    cout << "Microstates..." << endl;
-//    writeOutputMatrix(2, basin_obj.state_v_time(), 1, T, plhs);
-    writeOutputMatrix(3, alpha, T, 1, plhs);
-   writeOutputMatrix(4, pred_prob, 1, pred_prob.size(), plhs);
-    writeOutputMatrix(5, hist, 1, hist.size(), plhs);
-    writeOutputStruct(6, params, plhs);
+    writeOutputMatrix(2, P, nbasins, T, plhs);
+    writeOutputMatrix(3, basin_obj.emiss_prob(), nbasins, T, plhs);
+    //cout << "Microstates..." << endl;
+    // state_v_time() seg faults, see further notes in the function
+    //writeOutputMatrix(2, basin_obj.state_v_time(), 1, T, plhs);
+    writeOutputMatrix(4, alpha, T, 1, plhs);
+    writeOutputMatrix(5, pred_prob, 1, pred_prob.size(), plhs);
+    writeOutputMatrix(6, hist, 1, hist.size(), plhs);
     //cout << "Samples..." << endl;
     writeOutputMatrix(7, basin_obj.sample(100000), N,100000, plhs);
+    // word_list() gave error sometimes, when this was called from python,
+    //  dunno how it'll behave from matlab
 //    writeOutputMatrix(7, basin_obj.word_list(), N, hist.size(), plhs);
-//    writeOutputMatrix(6, basin_obj.stationary_prob(), 1,nbasins, plhs);
-*/    
+    writeOutputMatrix(8, basin_obj.stationary_prob(), 1,nbasins, plhs);
+    writeOutputMatrix(9, train_logli, niter, 1, plhs);
+    writeOutputMatrix(10, test_logli, niter, 1, plhs);
+#endif    
     
-    
+#ifndef matlabHMM
     // Mixture model
     cout << "Initializing EM..." << endl;
-    EMBasins<BasinType> basin_obj(st, binsize, nbasins);
-        
+    EMBasins<BasinType> basin_obj(st, st_test, binsize, nbasins);
+    
     cout << "Training model..." << endl;
-    vector<double> logli = basin_obj.train(niter);
+    vector<double> logli;
+    vector<double> test_logli;
+    tie(logli,test_logli) = basin_obj.train(niter);
     //vector<double> test_logli = basin_obj.test_logli;
     
 //    cout << "Testing..." << endl;
@@ -231,6 +255,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     
     vector<paramsStruct> params = basin_obj.basin_params();
     int nstates = basin_obj.nstates();
+    int nstates_test = basin_obj.nstates_test();
     cout << nstates << " states." << endl;
     
 //    cout << "Getting samples..." << endl;
@@ -240,17 +265,25 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
 
     cout << "Writing outputs..." << endl;    
     
-    writeOutputMatrix(0, basin_obj.w, nbasins,1, plhs);    
-    writeOutputStruct(1, params, plhs);
-//    writeOutputMatrix(2, basin_obj.word_list(), N, nstates, plhs);
+    // NOTE: matlab uses column-major while C/C++ uses row-major order
+    // Thus, call as writeOutputMatrix(plhs_index, Cmatrix, Ccolumn, Crow, plhs)
+    // Ccolumn then Crow not the other way around!
+    writeOutputStruct(0, params, plhs);
+    writeOutputMatrix(1, basin_obj.w, nbasins,1, plhs);    
     writeOutputMatrix(2, samples, N, nsamples, plhs);
-    writeOutputMatrix(3, basin_obj.state_hist(), nstates, 1, plhs);
-    writeOutputMatrix(4, basin_obj.P(), nbasins, nstates, plhs);
-    writeOutputMatrix(5, basin_obj.all_prob(), nstates, 1, plhs);
-    writeOutputMatrix(6, logli, niter, 1, plhs);
+    writeOutputMatrix(3, basin_obj.word_list(), N, nstates, plhs);
+    writeOutputMatrix(4, basin_obj.state_hist(), nstates, 1, plhs);
+    writeOutputMatrix(5, basin_obj.word_list_test(), N, nstates_test, plhs);
+    writeOutputMatrix(6, basin_obj.test_hist(), nstates_test, 1, plhs);
+    writeOutputMatrix(7, basin_obj.P(), nbasins, nstates, plhs);
+    writeOutputMatrix(8, basin_obj.P_test(), nbasins, nstates_test, plhs);
+    writeOutputMatrix(9, basin_obj.all_prob(), nstates, 1, plhs);
+    writeOutputMatrix(10, basin_obj.test_prob(), nstates_test, 1, plhs);
+    writeOutputMatrix(11, logli, niter, 1, plhs);
+    writeOutputMatrix(12, test_logli, niter, 1, plhs);
 //    writeOutputMatrix(6, P_test, nbasins, P_test.size()/nbasins, plhs);
-   
-    
+
+#endif    
     
     /*
     // k-fold cross-validation
@@ -416,6 +449,9 @@ py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double 
     cout << "Writing outputs..." << endl;    
     py::list outlist = py::list();
     
+    // NOTE: python uses row-major order just like C/C++, and unlike matlab
+    // Thus, call as writePyOutputMatrix(Cmatrix, Crow, Ccolumn)
+    // unlike in the matlab bindings above, where Crow and Ccolumn are flipped    
     outlist.append(writePyOutputStructDict(params));
     outlist.append(writePyOutputMatrix(basin_obj.w,1,nbasins));
     outlist.append(writePyOutputMatrix(samples,nsamples,N));
@@ -497,12 +533,15 @@ py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::nd
 
     cout << "Writing outputs..." << endl;
     py::list outlist = py::list();
-    
+
+    // NOTE: python uses row-major order just like C/C++, and unlike matlab
+    // Thus, call as writePyOutputMatrix(Cmatrix, Crow, Ccolumn)
+    // unlike in the matlab bindings above, where Crow and Ccolumn are flipped    
     outlist.append(writePyOutputStructDict(params));
     outlist.append(writePyOutputMatrix(basin_obj.get_trans(),nbasins,nbasins));
     outlist.append(writePyOutputMatrix(P,T,nbasins));
     outlist.append(writePyOutputMatrix(basin_obj.emiss_prob(),T,nbasins));
-    cout << "Microstates..." << endl;
+    //cout << "Microstates..." << endl;
     // state_v_time() seg faults, see further notes in the function
     //outlist.append(writePyOutputMatrix(basin_obj.state_v_time(),1,T));
     outlist.append(writePyOutputMatrix(alpha,1,T));
