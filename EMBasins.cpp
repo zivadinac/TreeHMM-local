@@ -13,8 +13,8 @@
 #include "TreeBasin.h"
 
 // Choose either MATLAB or PYTHON to link to via Boost
-#define MATLAB
-//#define PYTHON
+//#define MATLAB
+#define PYTHON
 
 #ifdef MATLAB
 #include "matrix.h"
