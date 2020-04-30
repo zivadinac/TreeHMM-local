@@ -26,14 +26,15 @@ BOOST_LIB = /usr/lib/x86_64-linux-gnu/
  
 # compile mesh classes
 TARGET = EMBasins
+CC = g++-7 # set g++ to 7 because code doesn't compile on 9.3, TODO fix it
  
 $(TARGET).so: $(TARGET).o
-	g++ -shared -Wl,--export-dynamic $(TARGET).o BasinModel.o TreeBasin.o -L$(BOOST_LIB) -lgsl -lgslcblas -lboost_python3 -lboost_numpy3  -L$(PYTHON_LIB_CONFIG) -lpython$(PYTHON_VERSION) -o $(TARGET).so
+	$(CC) -shared -Wl,--export-dynamic $(TARGET).o BasinModel.o TreeBasin.o -L$(BOOST_LIB) -lgsl -lgslcblas -lboost_python3 -lboost_numpy3  -L$(PYTHON_LIB_CONFIG) -lpython$(PYTHON_VERSION) -o $(TARGET).so
  
 $(TARGET).o: $(TARGET).cpp
-	g++ -fPIC -c BasinModel.cpp
-	g++ -fPIC -c TreeBasin.cpp
-	g++ -I$(PYTHON_INCLUDE) -I$(BOOST_INC) -fPIC -c $(TARGET).cpp
+	$(CC) -fPIC -c BasinModel.cpp
+	$(CC) -fPIC -c TreeBasin.cpp
+	$(CC) -I$(PYTHON_INCLUDE) -I$(BOOST_INC) -fPIC -c $(TARGET).cpp
 
 clean:
 	rm *.o
