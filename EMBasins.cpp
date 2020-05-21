@@ -403,7 +403,7 @@ void pyInit() {
     // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
     Py_Initialize();
     np::initialize();
-    cout << "Initialized python and numpy" << endl;
+    // cout << "Initialized python and numpy" << endl;
 }
 
 py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double binsize, int nbasins, int niter, double eta) {
