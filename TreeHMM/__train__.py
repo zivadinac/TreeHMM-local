@@ -43,7 +43,7 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
                               if > 1 only params trained on last fold are returned, 
                               but logli for all folds is written
             seed - seed integer value
-            normalize_log_li - if True divide train_log_li by (cross_val_folds-1) to get the same range as test_log_li
+            normalize_log_li - if True and cross_val_folds > 1 divide train_log_li by (cross_val_folds-1) to get the same range as test_log_li
 
         Return:
             Dictionary containing HMM params.
@@ -87,6 +87,9 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
 
             train_log_li[k,:] = train_log_li_this.flatten()
             test_log_li[k,:] = test_log_li_this.flatten()
+
+        if normalize_log_li:
+            train_log_li /= (cross_val_folds-1)
     else:
         params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = \
             orig.pyHMM(spike_times, __np.array([]), __np.array([]), float(bin_size), n_modes, n_iter, eta)
@@ -95,9 +98,6 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
     end = __time.time()
     training_length = end - start
     print(f"Finished training in {training_length} seconds.")
-
-    if normalize_log_li:
-        train_log_li /= (cross_val_folds-1)
 
     return __gatterHMMtrainResults(cross_val_folds, n_modes, params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li, test_log_li, eta, training_length, seed)
 
