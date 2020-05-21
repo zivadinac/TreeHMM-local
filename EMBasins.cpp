@@ -108,10 +108,11 @@ vector<double> mpow(vector<double>& matrix, int n, int k) {
 void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
  // #ifdef matlabHMM, then this function uses temporal correlations, i.e. uses HMM(),
  // and signature from matlab is as below
- // [freq,w,m,P,logli,prob] = EMBasins(st, unobserved_edges, binsize, nbasins, niter)
+ // [freq,w,m,P,logli,prob] = EMBasins(st, unobserved_edges, binsize, nbasins, niter, eta)
  // #ifndef matlabHMM, then this function doesn't use temporal correlations, i.e. uses EMBasins(),
  // and signature from matlab is as below
- // [freq,w,m,P,logli,prob] = EMBasins(st, st_test, unobserved_edges, binsize, nbasins, niter)
+ // [freq,w,m,P,logli,prob] = EMBasins(st, st_test, unobserved_edges, binsize, nbasins, niter, eta)
+ // eta is regularization parameter from paper (eta = 0.002)
 
     cout << "Reading inputs..." << endl;
     int N = mxGetNumberOfElements(prhs[0]);
@@ -156,11 +157,12 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     double binsize = *mxGetPr(prhs[2]);
     int nbasins = (int) *mxGetPr(prhs[3]);
     int niter = (int) *mxGetPr(prhs[4]);    
+    double eta = (double) *mxGetPr(prhs[5]);
 
   /*
     // Autocorrelation model
     Autocorr<BasinType> basin_obj(st, binsize, nbasins);
-    vector<double> logli = basin_obj.train(niter);
+    vector<double> logli = basin_obj.train(niter, eta);
     cout << "Viterbi..." << endl;
     vector<int> alpha = basin_obj.viterbi();
 //    cout << "P...." << endl;
@@ -200,7 +202,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     HMM<BasinType> basin_obj(st, unobserved_edges_low, unobserved_edges_high, binsize, nbasins);
     vector<double> train_logli;
     vector<double> test_logli;
-    tie(train_logli,test_logli) = basin_obj.train(niter);
+    tie(train_logli,test_logli) = basin_obj.train(niter, eta);
     cout << "Viterbi..." << endl;
     vector<int> alpha = basin_obj.viterbi(true);
     cout << "P...." << endl;
@@ -247,7 +249,7 @@ void mexFunction(int nlhs, mxArray *plhs[], int nrhs, const mxArray *prhs[]) {
     cout << "Training model..." << endl;
     vector<double> logli;
     vector<double> test_logli;
-    tie(logli,test_logli) = basin_obj.train(niter);
+    tie(logli,test_logli) = basin_obj.train(niter, eta);
     //vector<double> test_logli = basin_obj.test_logli;
     
 //    cout << "Testing..." << endl;
@@ -396,13 +398,22 @@ vector<double> getVec(np::ndarray arr) {
     return v;
 }
 
-py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double binsize, int nbasins, int niter) {
+void pyInit() {
+    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/simple.html
+    // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
+    Py_Initialize();
+    np::initialize();
+    cout << "Initialized python and numpy" << endl;
+}
+
+py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double binsize, int nbasins, int niter, double eta) {
 // params,w,samples,state_hist,P,prob,logli,P_test = pyEMBasins(spiketimes, spiketimes_test, binsize, nbasins, niter)
  
 // nrnspiketimes is a list of lists, nNeurons x nSpikeTimes (# of spike times is different for each neuron, so not an array
 // binsize is the number of samples per bin, @ 10KHz sample rate and a 20ms bin, binsize=200
 // nbasins is number of modes, around 70 for the data in Prentice et al 2016 for HMM & TreeBasin
 // niter is the number of times EM is repeated
+// eta is regularization parameter (paper uses eta = 0.002)
 
     // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/index.html
     // see: https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/object_wrappers/boost_python_list_hpp.html
@@ -410,8 +421,7 @@ py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double 
 
     // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/simple.html
     // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
-    Py_Initialize();
-    np::initialize();
+    pyInit();
   
     cout << "Reading inputs..." << endl;
     int N = len(nrnspiketimes);
@@ -425,7 +435,7 @@ py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double 
     cout << "Training model..." << endl;
     vector<double> logli;
     vector<double> test_logli;
-    tie(logli,test_logli) = basin_obj.train(niter);
+    tie(logli,test_logli) = basin_obj.train(niter, eta);
     //vector<double> test_logli = basin_obj.test_logli;
     
     // Aditya modified: I've added testing at each iter in train()
@@ -480,26 +490,20 @@ py::list pyEMBasins(py::list nrnspiketimes, py::list nrnspiketimes_test, double 
     return outlist;
 }
 
-void pyInit() {
-    // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/numpy/tutorial/simple.html
-    // Initialise the Python runtime, and the numpy module. Failure to call these results in segmentation errors!
-    Py_Initialize();
-    np::initialize();
-    cout << "Initialized python and numpy" << endl;
-}
-
-py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::ndarray & unobserved_edges_hi, double binsize, int nbasins, int niter) {
+py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::ndarray & unobserved_edges_hi, double binsize, int nbasins, int niter, double eta) {
 // params,w,samples,state_hist,P,prob,logli,P_test = pyEMBasins(spiketimes, spiketimes_test, binsize, nbasins, niter)
  
 // nrnspiketimes is a list of lists, nNeurons x nSpikeTimes (# of spike times is different for each neuron, so not an array
 // binsize is the number of samples per bin, @ 10KHz sample rate and a 20ms bin, binsize=200
 // nbasins is number of modes, around 70 for the data in Prentice et al 2016 for HMM & TreeBasin
 // niter is the number of times EM is repeated
+// eta is regularization parameter (paper uses eta = 0.002)
 
     // https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/index.html
     // see: https://www.boost.org/doc/libs/1_71_0/libs/python/doc/html/reference/object_wrappers/boost_python_list_hpp.html
     //cout << py::len(st) << py::extract<double>(st[0]) << endl;
   
+    pyInit();
     cout << "Reading inputs..." << endl;
     int N = len(nrnspiketimes);
     vector<vector<double>> st = getSpikeTimes(nrnspiketimes);
@@ -516,7 +520,7 @@ py::list pyHMM(py::list nrnspiketimes, np::ndarray & unobserved_edges_lo, np::nd
     HMM<BasinType> basin_obj(st, unobserved_edges_low, unobserved_edges_high, binsize, nbasins);
     vector<double> train_logli;
     vector<double> test_logli;
-    tie(train_logli,test_logli) = basin_obj.train(niter);
+    tie(train_logli,test_logli) = basin_obj.train(niter, eta);
     cout << "Viterbi..." << endl;
     vector<int> alpha = basin_obj.viterbi(true);
     cout << "P...." << endl;
@@ -882,7 +886,7 @@ tuple<vector<double>,double> EMBasins<BasinT>::test(const vector<vector<double> 
 
 
 template <class BasinT>
-vector<double> EMBasins<BasinT>::crossval(int niter, int k) {
+vector<double> EMBasins<BasinT>::crossval(int niter, int k, double eta) {
     int blocksize = floor(raster.size() / k);
     // Generate random permutation of time bins
     vector<int> tperm = rng->randperm(raster.size());
@@ -904,7 +908,7 @@ vector<double> EMBasins<BasinT>::crossval(int niter, int k) {
         }
         
     //    train (returns logli of test set)
-        vector<double> logli = train(niter);
+        vector<double> logli = train(niter, eta);
         for (int j=0; j<niter; j++) {
             all_logli[i*niter + j] = logli[j];
         }
@@ -914,7 +918,7 @@ vector<double> EMBasins<BasinT>::crossval(int niter, int k) {
 }
 
 template <class BasinT>
-tuple< vector<double>, vector<double> > EMBasins<BasinT>::train(int niter) {
+tuple< vector<double>, vector<double> > EMBasins<BasinT>::train(int niter, double eta) {
 
     cout << "Initializing EM params..." << endl;
     w.assign(nbasins,1/(double)nbasins);
@@ -949,7 +953,7 @@ tuple< vector<double>, vector<double> > EMBasins<BasinT>::train(int niter) {
         
         // M step
 //        double alpha = (i<niter/2) ? 1 - (double)i/(niter/2) : 0;
-        double alpha = 0.002;
+        double alpha = eta;
 //        if (i >= niter/2) {
 //            alpha = 0.002 + (1-0.002)*exp(-(double) (i-niter/2) * (10.0/(((double)(niter/2)-1))));
 //        }
@@ -1430,7 +1434,7 @@ vector<double> HMM<BasinT>::get_backward() {
 }
 
 template <class BasinT>
-tuple <vector<double>, vector<double> > HMM<BasinT>::train(int niter) {
+tuple <vector<double>, vector<double> > HMM<BasinT>::train(int niter, double eta) {
     
     cout << "Initializing EM params..." << endl;
     
@@ -1461,6 +1465,7 @@ tuple <vector<double>, vector<double> > HMM<BasinT>::train(int niter) {
 //    test_logli.assign(niter,0);
     vector<double> train_logli (niter);
     vector<double> test_logli (niter);
+    int test_ll_decrease_len = 0;
     for (int i=0; i<niter; i++) {
         cout << "Iteration " << i << endl;
         
@@ -1481,8 +1486,9 @@ tuple <vector<double>, vector<double> > HMM<BasinT>::train(int niter) {
         
         // M step
 
+
         //        double alpha = (i<niter/2) ? 1 - (double)i/(niter/2) : 0;
-        double alpha = 0.002;
+        double alpha = eta;
 //        if (i >= niter/2) {
 //            alpha = 0.002 + (1-0.002)*exp(-(double) (i-niter/2) * (10.0/(((double)(niter/2)-1))));
 //        }
@@ -2344,7 +2350,7 @@ void Autocorr<BasinT>::update_backward() {
 }
 
 template <class BasinT>
-vector<double> Autocorr<BasinT>::train(int niter) {
+vector<double> Autocorr<BasinT>::train(int niter, double eta) {
     /*
     (this->w).assign(this->nbasins, 1/(double)this->nbasins);
     this->basins.clear();
@@ -2373,7 +2379,7 @@ vector<double> Autocorr<BasinT>::train(int niter) {
     int uncorr_iter = 20;
     uncorr_iter = (uncorr_iter < niter) ? uncorr_iter : niter;
 //    vector<double> train_logli_begin = this->EMBasins<BasinT>::train(uncorr_iter);
-    vector<double> train_logli_begin = this->HMM<BasinT>::train(uncorr_iter);
+    vector<double> train_logli_begin = this->HMM<BasinT>::train(uncorr_iter, eta);
 //    for (int i=0; i<this->nbasins * this->N; i++) {
 //     //        basin_trans[i][0] = 0.1*((double) rand() / (double) RAND_MAX) + 0.45;
 //         basin_trans[i][0] = 0.5;
@@ -2417,7 +2423,7 @@ vector<double> Autocorr<BasinT>::train(int niter) {
         // M step
         
         //        double alpha = (i<niter/2) ? 1 - (double)i/(niter/2) : 0;
-        double alpha = 0.002;
+        double alpha = eta;
         //        if (i >= niter/2) {
         //            alpha = 0.002 + (1-0.002)*exp(-(double) (i-niter/2) * (10.0/(((double)(niter/2)-1))));
         //        }

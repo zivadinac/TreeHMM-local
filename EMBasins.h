@@ -81,8 +81,8 @@ public:
     EMBasins(vector<vector<double>>& st, vector<vector<double>>& st_test, double binsize, int nbasins);
     ~EMBasins();
     
-    tuple< vector<double>, vector<double> > train(int niter);
-    vector<double> crossval(int niter, int k);      // k-fold cross-validation
+    tuple< vector<double>, vector<double> > train(int niter, double eta=0.002);
+    vector<double> crossval(int niter, int k, double eta=0.002);      // k-fold cross-validation
     tuple<vector<double>,double> test(const vector<vector<double>>& st, double binsize);
     
     int nstates() const {return all_states.size();};
@@ -136,7 +136,7 @@ class HMM : public EMBasins<BasinT>
 public:
     HMM(vector<vector<double> >& st, vector<double>, vector<double>, double binsize, int nbasins);
     
-    tuple<vector<double>,vector<double>> train(int niter);
+    tuple<vector<double>,vector<double>> train(int niter, double eta=0.002);
     vector<int> viterbi(bool);
     
 //    vector<char> get_raster();
@@ -188,7 +188,7 @@ public:
     Autocorr(vector<vector<double> >& st, double binsize, int nbasins);
     ~Autocorr();
     
-    vector<double> train(int niter);
+    vector<double> train(int niter, double eta=0.002);
     vector<int> viterbi();
     vector<double> get_basin_trans();
     
