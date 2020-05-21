@@ -32,6 +32,7 @@ Spatial correlations / tree term can be removed for both of the two models above
 Thus you can switch from pyHMM to pyEMBasins, without recompiling, to remove time-domain correlations,  
  and TreeBasin to IndependentBasin, with recompiling, to remove space-domain correlations.
  
+ ### Update:
  After building, install pip package `pip install -e .`. Now use it in usualy way with `import TreeHMM`. Available functions are: [`TreeHMM.trainHMM`](https://github.com/zivadinac/TreeHMM-local/blob/master/TreeHMM/__train__.py#L31) (including regularization parameter eta), [`TreeHMM.io.saveTrainedHMM`](https://github.com/zivadinac/TreeHMM-local/blob/master/TreeHMM/__io__.py#L3) and [`TreeHMM.io.loadTrainedHMM`](https://github.com/zivadinac/TreeHMM-local/blob/master/TreeHMM/__io__.py#L7). Original functions (`pyInit`, `pyHMM`, `pyEMBasins`) can be accessed through `TreeHMM.orig`.
   
 -------------  
