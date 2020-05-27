@@ -1,3 +1,4 @@
+import multiprocessing as __mp
 import numpy as __np
 import time as __time
 import EMBasins as orig
@@ -27,6 +28,23 @@ def __gatterHMMtrainResults(cross_val_folds, n_modes, \
     res["training_length"] = training_length
     res["seed"] = seed
     return res
+
+def __oneFoldTrain(fold, res_dict, spike_times, unobserved_lo, unobserved_hi, bin_size, n_modes, n_iter, eta):
+    print(f"Started training on fold {fold} (n_modes {n_modes}).")
+    params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = \
+        orig.pyHMM(spike_times, unobserved_lo, unobserved_hi, float(bin_size), n_modes, n_iter, eta)
+
+    res_dict['params'] = params
+    res_dict['trans'] = trans
+    res_dict['P'] = P
+    res_dict['emiss_prob'] = emiss_prob
+    res_dict['alpha'] = alpha
+    res_dict['pred_prob'] = pred_prob
+    res_dict['hist'] = hist
+    res_dict['samples'] = samples
+    res_dict['stationary_prob'] = stationary_prob
+    res_dict['train_log_li_this'] = train_log_li_this
+    res_dict['test_log_li_this'] = test_log_li_this
 
 def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds=0, seed=None, normalize_log_li=True):
     """
@@ -65,6 +83,9 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
         bins = __np.arange(bin_num, dtype=__np.float64) * bin_size
         shuffled_inds = __np.random.permutation(__np.arange(bin_num, dtype=__np.int32))
         n_test = int(bin_num / cross_val_folds)
+        processes = []
+        res_dicts = []
+        mp_manager = __mp.Manager()
 
         for k in range(cross_val_folds):
             test_inds = shuffled_inds[k*n_test:(k+1)*n_test]
@@ -78,15 +99,16 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
                 # just in case, a last -1 is not there to close the last chunk
                 unobserved_hi = __np.append(unobserved_hi,[bin_num])
 
-            params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = \
-                orig.pyHMM(spike_times, unobserved_lo, unobserved_hi, float(bin_size), n_modes, n_iter, eta)
+            res_dicts.append(mp_manager.dict())
+            processes.append(__mp.Process(target=__oneFoldTrain, args=(k, res_dicts[k], spike_times, unobserved_lo, unobserved_hi, bin_size, n_modes, n_iter, eta)))
 
-            print(f"Finished cross validation round {k} of fitting.\
-                    \nTrain logL = {train_log_li_this[0][0]}\
-                    \nTest logL = {test_log_li_this[0][0]}")
+        [p.start() for p in processes]
+        [p.join() for p in processes]
+        params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = res_dicts[-1]
 
-            train_log_li[k,:] = train_log_li_this.flatten()
-            test_log_li[k,:] = test_log_li_this.flatten()
+        for k in range(cross_val_folds):
+            train_log_li[k,:] = res_dicts[k]["train_log_li_this"].flatten()
+            test_log_li[k,:] = res_dicts[k]["test_log_li_this"].flatten()
 
         if normalize_log_li:
             train_log_li /= (cross_val_folds-1)
