@@ -104,7 +104,7 @@ def trainHMM(spikes, n_modes, n_iter=100, eta=0.002, bin_size=1, cross_val_folds
 
         [p.start() for p in processes]
         [p.join() for p in processes]
-        params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = res_dicts[-1]
+        params, trans, P, emiss_prob, alpha, pred_prob, hist, samples, stationary_prob, train_log_li_this, test_log_li_this = res_dicts[-1].values()
 
         for k in range(cross_val_folds):
             train_log_li[k,:] = res_dicts[k]["train_log_li_this"].flatten()
